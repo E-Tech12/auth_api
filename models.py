@@ -1,6 +1,7 @@
 from extensions import db
 from flask_login import UserMixin
 from datetime import datetime, timedelta
+from datetime import datetime, timedelta
 from werkzeug.security import generate_password_hash, check_password_hash
 
 class User(db.Model, UserMixin):
@@ -11,14 +12,13 @@ class User(db.Model, UserMixin):
     password = db.Column(db.String(255), nullable=False)
     contact = db.Column(db.String(20), nullable=False)  
 
+
     def set_password(self, raw_password):
         self.password = generate_password_hash(raw_password)
 
-  
     def check_password(self, raw_password):
         return check_password_hash(self.password, raw_password)
      
-
 
 class PasswordReset(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -29,3 +29,14 @@ class PasswordReset(db.Model):
 
     def is_expired(self):
         return datetime.utcnow() > self.created_at + timedelta(minutes=1)
+
+
+class EmailOTP(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    email = db.Column(db.String(120), nullable=False)
+    otp = db.Column(db.String(6), nullable=False)
+    password = db.Column(db.String(200), nullable=False)  
+    fullname = db.Column(db.String(100), nullable=False)
+    address = db.Column(db.String(200))
+    contact = db.Column(db.String(20))
+    expires_at = db.Column(db.DateTime, nullable=False)

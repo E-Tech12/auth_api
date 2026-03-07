@@ -6,9 +6,10 @@ import random
 import logging
 
 from extensions import db, mail
-from models import User,PasswordReset
+from models import User,PasswordReset,EmailOTP
 
 from routes.auth_route import auth_bp
+
 from routes.dashboard_route import dashboard_bp
 
 app = Flask(__name__)

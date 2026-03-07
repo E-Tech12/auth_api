@@ -3,15 +3,16 @@ import random
 from werkzeug.security import generate_password_hash
 from flask_login import login_required, login_user
 from flask_mail import Message
+import re
+from datetime import datetime, timedelta
 
 from extensions import db, mail
-from models import User, PasswordReset
+from models import User, PasswordReset,EmailOTP
 
 auth_bp = Blueprint('auth', __name__)
 
 @auth_bp.route("/api/v1/auth/signup", methods=["POST"])
 def signup():
-
     data = request.get_json()
 
     email = data.get("email")
@@ -20,29 +21,75 @@ def signup():
     address = data.get("address")
     contact = data.get("contact")
 
-    if not email or not password:
-        return jsonify({"error": "Email and password are required"}), 400
+    if not email or not password or not fullname:
+        return jsonify({"error": "Email, password, and fullname are required"}), 400
 
+    
     existing_user = User.query.filter_by(email=email).first()
     if existing_user:
-        return jsonify({"error": "User already exists"}), 409
+        return jsonify({"error": "Invalid credentials"}), 409
 
-    hashed_password = generate_password_hash(password)
 
-    new_user = User(
+    otp = str(random.randint(100000, 999999))
+    expiry = datetime.utcnow() + timedelta(minutes=5)
+
+    
+    otp_record = EmailOTP(
         email=email,
-        password=hashed_password,
+        otp=otp,
+        password=password,  
         fullname=fullname,
         address=address,
-        contact=contact
+        contact=contact,
+        expires_at=expiry
+    )
+    db.session.add(otp_record)
+    db.session.commit()
+
+    msg = Message(
+        subject="Verify your email",
+        recipients=[email],
+        body=f"Your OTP code is {otp}. It expires in 5 minutes."
+    )
+    mail.send(msg)
+
+    return jsonify({"message": "OTP sent to your email"}), 200
+
+
+@auth_bp.route("/api/v1/auth/verify-signup-otp", methods=["POST"])
+def verify_signup_otp():
+    data = request.get_json()
+
+    email = data.get("email")
+    otp = data.get("otp")
+
+    if not email or not otp:
+        return jsonify({"error": "Email and OTP are required"}), 400
+
+
+    otp_record = EmailOTP.query.filter_by(email=email, otp=otp).first()
+    if not otp_record:
+        return jsonify({"error": "Invalid OTP"}), 400
+
+    if otp_record.expires_at < datetime.utcnow():
+        db.session.delete(otp_record)
+        db.session.commit()
+        return jsonify({"error": "OTP expired"}), 400
+
+    hashed_password = generate_password_hash(otp_record.password)
+    new_user = User(
+        email=otp_record.email,
+        password=hashed_password,
+        fullname=otp_record.fullname,
+        address=otp_record.address,
+        contact=otp_record.contact
     )
 
     db.session.add(new_user)
+    db.session.delete(otp_record)
     db.session.commit()
 
-    return jsonify({
-        "message": "User registered successfully"
-    }), 201
+    return jsonify({"message": "Signup successful"}), 201
 
 @auth_bp.route("/api/v1/auth/login", methods=["POST"])
 def login():
@@ -58,10 +105,10 @@ def login():
     user = User.query.filter_by(email=email).first()
 
     if not user:
-        return jsonify({"error": "User not found"}), 404
+        return jsonify({"error": "Invalid Credentials"}), 404
 
     if not user.check_password(password):
-        return jsonify({"error": "Invalid credentials"}), 401
+        return jsonify({"error": "Invalid Credentials"}), 401
 
     login_user(user)
 
@@ -115,35 +162,6 @@ def forgot_password():
             "error": "Failed to send OTP"
         }), 500
 
-@auth_bp.route("/api/v1/auth/verify-otp", methods=["POST"])
-def verify_otp():
-
-    data = request.get_json()
-    entered_otp = data.get("otp")
-
-    if not entered_otp:
-        return jsonify({"error": "OTP is required"}), 400
-
-    reset_request = PasswordReset.query.filter_by(
-        otp=entered_otp,
-        is_used=False
-    ).order_by(PasswordReset.created_at.desc()).first()
-
-    if not reset_request:
-        return jsonify({"error": "Invalid OTP"}), 400
-
-    if reset_request.is_expired():
-        return jsonify({"error": "OTP expired"}), 400
-
-    reset_request.is_used = True
-    db.session.commit()
-
-    session['reset_user_id'] = reset_request.user_id
-
-    return jsonify({
-        "message": "OTP verified successfully"
-    }), 200
-    
 
 @auth_bp.route("/api/v1/auth/reset-password", methods=['POST'])
 def reset_password():
@@ -170,5 +188,4 @@ def reset_password():
     return jsonify({
         "message": "Password reset successfully"
     }), 200
-    
 
